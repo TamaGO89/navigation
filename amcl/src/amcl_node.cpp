@@ -835,6 +835,9 @@ void AmclNode::updatePoseFromServer()
 void 
 AmclNode::checkLaserReceived(const ros::TimerEvent& event)
 {
+  // EDIT : Must get lock before checking a variable modified in a different thread
+  boost::recursive_mutex::scoped_lock lr(configuration_mutex_);
+  if ( map_ == NULL ) return;
   ros::Duration d = ros::Time::now() - last_laser_received_ts_;
   if(d > laser_check_interval_)
   {
@@ -896,6 +899,8 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
   lasers_update_.clear();
   frame_to_laser_.clear();
 
+  // EDIT : if msg.data.size() == 0 skip this
+  if ( msg.data.size() < 1 ) return;
   map_ = convertMap(msg);
 
 #if NEW_UNIFORM_SAMPLING
@@ -1089,10 +1094,11 @@ bool
 AmclNode::globalLocalizationCallback(std_srvs::Empty::Request& req,
                                      std_srvs::Empty::Response& res)
 {
+  // EDIT : lock must be acquired before checking map_ pointer
+  boost::recursive_mutex::scoped_lock gl(configuration_mutex_);
   if( map_ == NULL ) {
     return true;
   }
-  boost::recursive_mutex::scoped_lock gl(configuration_mutex_);
   ROS_INFO("Initializing with uniform distribution");
   pf_init_model(pf_, (pf_init_model_fn_t)AmclNode::uniformPoseGenerator,
                 (void *)map_);
@@ -1128,12 +1134,15 @@ AmclNode::setMapCallback(nav_msgs::SetMap::Request& req,
 void
 AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
 {
-  std::string laser_scan_frame_id = stripSlash(laser_scan->header.frame_id);
-  last_laser_received_ts_ = ros::Time::now();
+  // EDIT : lock must be acquired before checking map_ pointer
+  boost::recursive_mutex::scoped_lock lr(configuration_mutex_);
   if( map_ == NULL ) {
     return;
   }
-  boost::recursive_mutex::scoped_lock lr(configuration_mutex_);
+  // EDIT : No reason to update timestamp and frame_id if map_ == nullptr
+  std::string laser_scan_frame_id = stripSlash(laser_scan->header.frame_id);
+  last_laser_received_ts_ = ros::Time::now();
+
   int laser_index = -1;
 
   // Do we have the base->base_laser Tx yet?
