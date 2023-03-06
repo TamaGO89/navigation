@@ -319,6 +319,8 @@ main(int argc, char** argv)
   // Override default sigint handler
   signal(SIGINT, sigintHandler);
 
+  ROS_INFO("  !! AMCL - AUTOGNITY !!");
+
   // Make our node available to sigintHandler
   amcl_node_ptr.reset(new AmclNode());
 
