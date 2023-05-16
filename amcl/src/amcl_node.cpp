@@ -52,6 +52,7 @@
 #include "nav_msgs/GetMap.h"
 #include "nav_msgs/SetMap.h"
 #include "std_srvs/Empty.h"
+#include "std_srvs/SetBool.h"  // EDIT : start_n_stop
 
 // For transform support
 #include "tf2/LinearMath/Transform.h"
@@ -169,6 +170,7 @@ class AmclNode
                                     std_srvs::Empty::Response& res);
     bool setMapCallback(nav_msgs::SetMap::Request& req,
                         nav_msgs::SetMap::Response& res);
+    bool startstopCallback(std_srvs::SetBool::Request &req, std_srvs::SetBoolResponse &res);  // EDIT : start_n_stop
 
     void laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan);
     void initialPoseReceived(const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg);
@@ -193,6 +195,8 @@ class AmclNode
 
     bool use_map_topic_;
     bool first_map_only_;
+    bool start_n_stop_=true;  // EDIT : start_n_stop
+    std::string node_name_;  // EDIT : start_n_stop
 
     ros::Duration gui_publish_period;
     ros::Time save_pose_last_time;
@@ -253,6 +257,7 @@ class AmclNode
     ros::ServiceServer global_loc_srv_;
     ros::ServiceServer nomotion_update_srv_; //to let amcl update samples without requiring motion
     ros::ServiceServer set_map_srv_;
+    ros::ServiceServer start_n_stop_srv_;  // EDIT : Start and stop service for AMCL
     ros::Subscriber initial_pose_sub_old_;
     ros::Subscriber map_sub_;
 
@@ -416,8 +421,7 @@ AmclNode::AmclNode() :
   }
   else
   {
-    ROS_WARN("Unknown laser model type \"%s\"; defaulting to likelihood_field model",
-             tmp_model_type.c_str());
+    ROS_WARN("Unknown laser model type \"%s\"; defaulting to likelihood_field model", tmp_model_type.c_str());
     laser_model_type_ = LASER_MODEL_LIKELIHOOD_FIELD;
   }
 
@@ -432,8 +436,7 @@ AmclNode::AmclNode() :
     odom_model_type_ = ODOM_MODEL_OMNI_CORRECTED;
   else
   {
-    ROS_WARN("Unknown odom model type \"%s\"; defaulting to diff model",
-             tmp_model_type.c_str());
+    ROS_WARN("Unknown odom model type \"%s\"; defaulting to diff model", tmp_model_type.c_str());
     odom_model_type_ = ODOM_MODEL_DIFF;
   }
 
@@ -465,6 +468,10 @@ AmclNode::AmclNode() :
     bag_scan_period_.fromSec(bag_scan_period);
   }
 
+  // EDIT : start_n_stop
+  if(!private_nh_.getParam("node", node_name_))
+    node_name_ = "amcl";
+
   odom_frame_id_ = stripSlash(odom_frame_id_);
   base_frame_id_ = stripSlash(base_frame_id_);
   global_frame_id_ = stripSlash(global_frame_id_);
@@ -483,6 +490,7 @@ AmclNode::AmclNode() :
                                          this);
   nomotion_update_srv_= nh_.advertiseService("request_nomotion_update", &AmclNode::nomotionUpdateCallback, this);
   set_map_srv_= nh_.advertiseService("set_map", &AmclNode::setMapCallback, this);
+  start_n_stop_srv_= nh_.advertiseService(node_name_+"/start_n_stop", &AmclNode::startstopCallback, this);
 
   laser_scan_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(nh_, scan_topic_, 100);
   laser_scan_filter_ = 
@@ -1664,4 +1672,28 @@ AmclNode::standardDeviationDiagnostics(diagnostic_updater::DiagnosticStatusWrapp
   {
     diagnostic_status.summary(diagnostic_msgs::DiagnosticStatus::OK, "OK");
   }
+}
+
+bool AmclNode::startstopCallback(std_srvs::SetBool::Request  &req,
+                       std_srvs::SetBool::Response &res){
+  boost::recursive_mutex::scoped_lock cfl(configuration_mutex_);
+  // If nothing changed just return from the callback
+  // ROS_INFO("!! AMCL : START_N_STOP REQUEST");
+  if ( start_n_stop_ == req.data ) {
+    res.success = true;
+    return true;
+  }
+  // If a stop request arrived clear map data
+  if ( ! req.data ) {
+    // ROS_INFO("!! AMCL : SNS CLEANUP");
+    freeMapDependentMemory();
+    lasers_.clear();
+    lasers_update_.clear();
+    frame_to_laser_.clear();
+  }
+  // Align slam and request
+  start_n_stop_ = req.data;
+  // ROS_INFO("!! AMCL : SNS UPDATE VARIABLE : %d", start_n_stop_);
+  res.success = true;
+  return true;
 }
