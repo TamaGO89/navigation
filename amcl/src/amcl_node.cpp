@@ -42,6 +42,7 @@
 
 // roscpp
 #include "ros/ros.h"
+#include <ros/console.h>
 
 // Messages that I need
 #include "sensor_msgs/LaserScan.h"
@@ -319,12 +320,16 @@ int
 main(int argc, char** argv)
 {
   ros::init(argc, argv, "amcl");
+
+  if( ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Warn) )
+    ros::console::notifyLoggerLevelsChanged();
+
   ros::NodeHandle nh;
 
   // Override default sigint handler
   signal(SIGINT, sigintHandler);
 
-  ROS_INFO("  !! AMCL - AUTOGNITY !!");
+  ROS_WARN("  !! AMCL - AUTOGNITY !!");
 
   // Make our node available to sigintHandler
   amcl_node_ptr.reset(new AmclNode());
@@ -1146,7 +1151,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
 {
   // EDIT : lock must be acquired before checking map_ pointer
   boost::recursive_mutex::scoped_lock lr(configuration_mutex_);
-  if( map_ == NULL ) {
+  if( map_ == NULL || ! start_n_stop_ ) {
     return;
   }
   // EDIT : No reason to update timestamp and frame_id if map_ == nullptr
