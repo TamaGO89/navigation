@@ -915,7 +915,7 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
   frame_to_laser_.clear();
 
   // EDIT : if msg.data.size() == 0 skip this
-  if ( msg.data.size() < 1 ) return;
+  // if ( msg.data.size() < 1 ) return;
   map_ = convertMap(msg);
 
 #if NEW_UNIFORM_SAMPLING
