@@ -235,6 +235,104 @@ public:
    * getUnpaddedRobotFootprint(). */
   void setUnpaddedRobotFootprintPolygon(const geometry_msgs::Polygon& footprint);
 
+  inline double to_double( const XmlRpc::XmlRpcValue& xml ) {
+    switch ( xml.getType() ) {
+      case XmlRpc::XmlRpcValue::TypeDouble:
+        return double(xml);
+      case XmlRpc::XmlRpcValue::TypeInt:
+        return double( int(xml) );
+      default:
+        return 0.0;
+    }
+  };
+  // EDIT : TAMA 2023-08-01 : Initialization for costmap
+  inline bool init( const XmlRpc::XmlRpcValue& xml ) {
+    std::cout << this->name_.c_str() << " : START " << std::endl;
+    // DELETE THREAD
+    if ( this->map_update_thread_ != NULL ) {
+      this->map_update_thread_shutdown_ = true;
+      this->map_update_thread_->join();
+      delete this->map_update_thread_;
+      this->map_update_thread_ = NULL;
+    }
+    // COSTMAP
+    if ( ! this->layered_costmap_->isSizeLocked() ) {
+      bool update = false;
+      double resolution = this->getCostmap()->getResolution();
+      if ( xml.hasMember("resolution") && resolution != to_double(xml["resolution"]) ) {
+        resolution = to_double(xml["resolution"]); update = true; }
+      uint32_t width = this->getCostmap()->getSizeInCellsX();
+      if ( xml.hasMember("width") && width != uint32_t(to_double(xml["width"])/resolution) ) {
+        width = uint32_t(to_double(xml["width"])/resolution); update = true; }
+      uint32_t height = this->getCostmap()->getSizeInCellsY();
+      if ( xml.hasMember("height") && height != uint32_t(to_double(xml["height"])/resolution) ) {
+        height = uint32_t(to_double(xml["height"])/resolution); update = true; }
+      double origin_x = this->getCostmap()->getOriginX();
+      if ( xml.hasMember("origin_x") && origin_x != to_double(xml["origin_x"]) ) {
+        origin_x = to_double(xml["origin_x"]); update = true; }
+      double origin_y = this->getCostmap()->getOriginY();
+      if ( xml.hasMember("origin_y") && origin_y != to_double(xml["origin_y"]) ) {
+        origin_y = to_double(xml["origin_y"]); update = true; }
+      if ( update )
+        this->layered_costmap_->resizeMap( width, height, resolution, origin_x, origin_y );
+    }
+    // LAYERS
+    const XmlRpc::XmlRpcValue& vec ( xml["layers"] );
+    std::vector < boost::shared_ptr<Layer> > *plugins = layered_costmap_->getPlugins();
+    bool enabled;
+    {
+      boost::unique_lock<Costmap2D::mutex_t> lock(*(this->getCostmap()->getMutex()));
+      for ( boost::shared_ptr<Layer> & plugin : * plugins ) {
+        const std::string& name ( plugin->getName() );
+        enabled=false;
+        for ( int i=0; i<vec.size(); ++i ) {
+          const std::string& layer_name ( vec[i] );
+          if ( ( name.find(layer_name) + layer_name.size() ) == name.size() ) {
+            enabled=true;
+            break;
+          }
+        }
+        plugin->setEnabled(enabled);
+      }
+    }
+    // FOOTPRINT
+    {
+      bool update = false;
+      if ( xml.hasMember("footprint_padding") )
+        this->footprint_padding_ = to_double( xml["footprint_padding"] );
+      if ( xml.hasMember("footprint") ) {
+        XmlRpc::XmlRpcValue& footprint ( xml["footprint"] );
+        std::vector<geometry_msgs::Point> point_vector;
+        switch ( footprint.getType() ) {
+          case XmlRpc::XmlRpcValue::TypeString:
+            if ( makeFootprintFromString( footprint, point_vector ) )
+              this->setUnpaddedRobotFootprint( point_vector );
+            break;
+          case XmlRpc::XmlRpcValue::TypeArray:
+            if ( footprint.size() > 2 )
+              this->setUnpaddedRobotFootprint( makeFootprintFromXMLRPC( footprint, "footprint" ) );
+            break;
+          default:
+            break;
+        }
+      } else if ( xml.hasMember("robot_radius") ) {
+        this->setUnpaddedRobotFootprint( makeFootprintFromRadius( to_double( xml["robot_radius"] ) ) );
+      } else if ( update ) {
+        this->setUnpaddedRobotFootprint( this->unpadded_footprint_ );
+      }
+    }
+    // THREADING
+    this->map_update_thread_shutdown_ = false;
+    if ( xml.hasMember("transform_tolerance") && this->transform_tolerance_ != to_double(xml["transform_tolerance"]) ) {
+      this->transform_tolerance_ = to_double(xml["transform_tolerance"]); }
+    if ( xml.hasMember("publish_frequency") && this->publish_cycle.toSec() != 1.0/to_double(xml["publish_frequency"]) ) {
+      this->publish_cycle.fromSec( 1.0 / to_double(xml["publish_frequency"]) ); }
+    if ( xml.hasMember("update_frequency") && to_double(xml["update_frequency"]) > 0.0 ) {
+      this->map_update_thread_ =
+          new boost::thread(boost::bind(&Costmap2DROS::mapUpdateLoop, this, to_double(xml["update_frequency"]))); }
+    return true;
+  };
+
 protected:
   LayeredCostmap* layered_costmap_;
   std::string name_;

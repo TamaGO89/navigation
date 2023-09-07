@@ -113,6 +113,9 @@ public:
     return enabled_;
   }
 
+  // EDIT : TAMA 2023-08-01 : set layer as enabled or disabled
+  inline void setEnabled(bool enabled) { this->enabled_ = enabled; };
+
   /** @brief Implement this to make this layer match the size of the parent costmap. */
   virtual void matchSize() {}
 
